@@ -1,6 +1,5 @@
-# =========================
+
 # LIBRARIES
-# =========================
 library(httr)
 library(jsonlite)
 library(dplyr)
@@ -14,22 +13,18 @@ library(stringr)
 library(purrr)
 library(readr)
 
-# =========================
-# CREDENTIALS & CONFIG
-# =========================
 
+# CREDENTIALS & CONFIG
 
 USERNAME <- Sys.getenv("DHIS2_USERNAME")
 PASSWORD <- Sys.getenv("DHIS2_PASSWORD")
 BASE_URL <- Sys.getenv("DHIS2_BASE_URL")
 
-OUTPUT_DIR <- "C:/Users/Obadia/Desktop/DHIS2"
+OUTPUT_DIR <- "YOUR OUTPUT DIRECTORY"
 dir.create(OUTPUT_DIR, showWarnings = FALSE, recursive = TRUE)
 
-# =========================
-# HELPER FUNCTIONS
-# =========================
 
+# HELPER FUNCTIONS
 # Build hierarchy for org units (left joins to avoid losing units)
 make_orgunits_hierarchy <- function(df) {
   df %>%
@@ -130,7 +125,7 @@ get_data_elements <- function() {
   content(r, "text") %>% fromJSON() %>% .$dataElements %>% as.data.frame()
 }
 
-# =========================
+
 # METADATA
 org_units <- get_org_units()
 data_elements <- get_data_elements()
@@ -141,12 +136,13 @@ org_units_cleaned <- org_units %>%
   rename(mfl_code = code) %>%
   select(facility_id, facility_name, ward_name, sub_county_name, county_name, mfl_code)
 
-# =========================
+
 # DATA ELEMENTS TO FETCH
+
 DX <- c("PgQIx7Hq1kp.wBWcFk7k1qY", "PgQIx7Hq1kp.K4WLOEhtcvC",
         "NMCIxSeGpS3.wBWcFk7k1qY", "NMCIxSeGpS3.K4WLOEhtcvC")
 
-# =========================
+
 # BATCHING FACILITIES
 BATCH_SIZE <- 50
 facility_chunks <- org_units_cleaned %>%
@@ -156,7 +152,7 @@ facility_chunks <- org_units_cleaned %>%
   group_by(batch) %>%
   group_split()
 
-# =========================
+
 # EXTRACT DATA
 all_data <- tibble(
   org_unit = character(),
@@ -195,8 +191,8 @@ for(i in seq_along(facility_chunks)) {
 
 cat("Download complete. Total rows:", nrow(all_data), "\n")
 
-# =========================
-# FINAL DATA CLEANING / MATRIX
+
+# FINAL DATA CLEANING / MATRIX/WIDE FORMAT
 final_data <- all_data %>%
   mutate(period = ym(period)) %>%
   left_join(org_units_cleaned, by = c("org_unit" = "facility_id")) %>%
@@ -218,8 +214,7 @@ final_data <- all_data %>%
     values_from = value
   )
 
-# =========================
-# =========================
+
 # SAVE OUTPUT
 
 # Ensure directory exists
