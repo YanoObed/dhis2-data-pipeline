@@ -1,0 +1,19 @@
+# R environment files (VERY IMPORTANT)
+.Renviron
+.Rhistory
+.RData
+.Ruserdata
+
+# RStudio project files
+.Rproj.user/
+
+# Output data (avoid uploading sensitive data)
+*.csv
+*.xlsx
+
+# Temporary files
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
