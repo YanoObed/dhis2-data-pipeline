@@ -27,25 +27,62 @@ dir.create(OUTPUT_DIR, showWarnings = FALSE, recursive = TRUE)
 # HELPER FUNCTIONS
 # Build hierarchy for org units (left joins to avoid losing units)
 make_orgunits_hierarchy <- function(df) {
-  df %>%
+  
+  facilities <- df %>%
     filter(level == 5) %>%
-    rename(facility_id = id, facility_name = name, ward_id = parent_id) %>%
-    left_join(
-      df %>% filter(level == 4) %>% select(-level) %>% rename(ward_name = name, ward_id = id, sub_county_id = parent_id),
-      by = join_by(ward_id)
+    select(
+      id,
+      name,
+      code,
+      parent_id,
+      ownership
     ) %>%
-    left_join(
-      df %>% filter(level == 3) %>% select(-level) %>% rename(sub_county_name = name, sub_county_id = id, county_id = parent_id),
-      by = join_by(sub_county_id)
-    ) %>%
-    left_join(
-      df %>% filter(level == 2) %>% select(-level) %>% rename(county_name = name, county_id = id, country_id = parent_id),
-      by = join_by(county_id)
-    ) %>%
-    left_join(
-      df %>% filter(level == 1) %>% select(-level, -parent_id) %>% rename(country_name = name, country_id = id),
-      by = join_by(country_id)
-    ) %>%
+    rename(
+      facility_id = id,
+      facility_name = name,
+      ward_id = parent_id
+    )
+  
+  wards <- df %>%
+    filter(level == 4) %>%
+    select(id, name, parent_id) %>%
+    rename(
+      ward_id = id,
+      ward_name = name,
+      sub_county_id = parent_id
+    )
+  
+  sub_counties <- df %>%
+    filter(level == 3) %>% 
+    select(id, name, parent_id) %>%
+    rename(
+      sub_county_id = id,
+      sub_county_name = name,
+      county_id = parent_id
+    )
+  
+  counties <- df %>%
+    filter(level == 2) %>%
+    select(id, name, parent_id) %>%
+    rename(
+      county_id = id,
+      county_name = name,
+      country_id = parent_id
+    )
+  
+  country <- df %>%
+    filter(level == 1) %>%
+    select(id, name) %>%
+    rename(
+      country_id = id,
+      country_name = name
+    )
+  
+  facilities %>%
+    left_join(wards, by = "ward_id") %>%
+    left_join(sub_counties, by = "sub_county_id") %>%
+    left_join(counties, by = "county_id") %>%
+    left_join(country, by = "country_id") %>%
     relocate(facility_id, .before = facility_name)
 }
 
@@ -111,12 +148,27 @@ extract_dhis2_data <- function(username, password, data_elements, org_units, sta
 
 # Fetch org units
 get_org_units <- function() {
-  url <- paste0(BASE_URL, "/api/organisationUnits?fields=id,name,level,code,parent&paging=false")
-  r <- GET(url, authenticate(USERNAME, PASSWORD), timeout(60))
+  
+  url <- paste0(
+    BASE_URL,
+    "/api/organisationUnits?",
+    "fields=id,name,level,code,parent,organisationUnitGroups[id,displayName]&paging=false"
+  )
+  
+  r <- GET(
+    url,
+    authenticate(USERNAME, PASSWORD),
+    timeout(60)
+  )
+  
   stopifnot(status_code(r) == 200)
-  content(r, "text") %>% fromJSON() %>% .$organisationUnits %>% as.data.frame()
+  
+  x <- content(r, "text") %>%
+    fromJSON()
+  
+  x$organisationUnits %>%
+    as.data.frame()
 }
-
 # Fetch data elements
 get_data_elements <- function() {
   url <- paste0(BASE_URL, "/api/dataElements?fields=id,name,shortName&paging=false")
@@ -125,24 +177,87 @@ get_data_elements <- function() {
   content(r, "text") %>% fromJSON() %>% .$dataElements %>% as.data.frame()
 }
 
-
+# =========================
 # METADATA
 org_units <- get_org_units()
+
+
+# Facility Ownership lookup
+# =========================
+# OWNERSHIP MAPPING
+# =========================
+
+ownership_lookup <- data.frame(
+  id = c(
+    "AaAF5EmS1fk",
+    "g58rumvciv2",
+    "eT1vvFVhLHc",
+    "aRxa6o8GqZN"
+  ),
+  ownership = c(
+    "Public",
+    "NGO",
+    "Faith Based",
+    "Private"
+  )
+)
+
+
+org_units$ownership <- map_chr(
+  org_units$organisationUnitGroups,
+  function(g){
+    
+    if(is.null(g) || nrow(g)==0)
+      return(NA_character_)
+    
+    
+    found <- ownership_lookup$ownership[
+      match(
+        g$id,
+        ownership_lookup$id
+      )
+    ]
+    
+    found <- found[!is.na(found)]
+    
+    
+    if(length(found)>0)
+      return(found[1])
+    
+    
+    NA_character_
+  }
+)
+
+
 data_elements <- get_data_elements()
 
 org_units_cleaned <- org_units %>%
-  unnest_wider(parent, names_sep = "_") %>%
+  unnest_wider(parent, names_sep="_") %>%
   make_orgunits_hierarchy() %>%
   rename(mfl_code = code) %>%
-  select(facility_id, facility_name, ward_name, sub_county_name, county_name, mfl_code)
+  select(
+    facility_id,
+    facility_name,
+    ward_name,
+    sub_county_name,
+    county_name,
+    ownership,
+    mfl_code
+  )
 
+# =========================
+DX <- c(
+  "PgQIx7Hq1kp.wBWcFk7k1qY",   # DMPA_IM_New_clients
+  "PgQIx7Hq1kp.K4WLOEhtcvC",   # DMPA_IM_Re_visits
+  "NMCIxSeGpS3.wBWcFk7k1qY",   # DMPA_SC_New_clients
+  "NMCIxSeGpS3.K4WLOEhtcvC",   # DMPA_SC_Re_visits
+  
+  "Wv02gixbRpT.DTYqflFj4uE",   # Hormonal IUD (COC 1)
+  "Wv02gixbRpT.xiLt33hq7so"    # Hormonal IUD (COC 2)
+)
 
-# DATA ELEMENTS TO FETCH
-
-DX <- c("PgQIx7Hq1kp.wBWcFk7k1qY", "PgQIx7Hq1kp.K4WLOEhtcvC",
-        "NMCIxSeGpS3.wBWcFk7k1qY", "NMCIxSeGpS3.K4WLOEhtcvC")
-
-
+# =========================
 # BATCHING FACILITIES
 BATCH_SIZE <- 50
 facility_chunks <- org_units_cleaned %>%
@@ -152,7 +267,7 @@ facility_chunks <- org_units_cleaned %>%
   group_by(batch) %>%
   group_split()
 
-
+# =========================
 # EXTRACT DATA
 all_data <- tibble(
   org_unit = character(),
@@ -176,7 +291,7 @@ for(i in seq_along(facility_chunks)) {
     DX,
     org_units_batch,
     "2025-01-01",
-    "2026-03-01"
+    "2026-08-01"
   )
   
   if(nrow(batch_data) > 0) {
@@ -192,49 +307,58 @@ for(i in seq_along(facility_chunks)) {
 cat("Download complete. Total rows:", nrow(all_data), "\n")
 
 
-# FINAL DATA CLEANING / MATRIX/WIDE FORMAT
+
+#MASTER LIST
 final_data <- all_data %>%
   mutate(period = ym(period)) %>%
-  left_join(org_units_cleaned, by = c("org_unit" = "facility_id")) %>%
+  left_join(
+    org_units_cleaned,
+    by = c("org_unit" = "facility_id")
+  ) %>%
   mutate(
     indicator_name = case_when(
       analytic == "PgQIx7Hq1kp.wBWcFk7k1qY" ~ "DMPA_IM_New_clients",
       analytic == "PgQIx7Hq1kp.K4WLOEhtcvC" ~ "DMPA_IM_Re_visits",
       analytic == "NMCIxSeGpS3.wBWcFk7k1qY" ~ "DMPA_SC_New_clients",
       analytic == "NMCIxSeGpS3.K4WLOEhtcvC" ~ "DMPA_SC_Re_visits",
+      
+      analytic == "Wv02gixbRpT.DTYqflFj4uE" ~ "Hormonal_IUD",
+      analytic == "Wv02gixbRpT.xiLt33hq7so" ~ "Hormonal_IUD",
+      
       TRUE ~ NA_character_
     )
   ) %>%
   filter(!is.na(indicator_name)) %>%
-  group_by(county_name, sub_county_name, facility_name, org_unit, period, indicator_name) %>%
-  summarise(value = sum(as.numeric(value), na.rm = TRUE), .groups = "drop") %>%
+  group_by(
+    county_name,
+    sub_county_name,
+    facility_name,
+    org_unit,
+    ownership,
+    period,
+    indicator_name
+  ) %>%
+  summarise(
+    value = sum(as.numeric(value), na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
   pivot_wider(
-    id_cols = c(county_name, sub_county_name, facility_name, org_unit, period),
+    id_cols = c(
+      county_name,
+      sub_county_name,
+      facility_name,
+      org_unit,
+      ownership,
+      period
+    ),
     names_from = indicator_name,
     values_from = value
   )
 
+names(final_data)
 
-# SAVE OUTPUT
+table(final_data$ownership, useNA="always")
 
-# Ensure directory exists
-dir.create(OUTPUT_DIR, showWarnings = FALSE, recursive = TRUE)
-
-file_base <- paste0("KHIS_DMPA_Data_", Sys.Date())
-
-# Save Excel
-excel_path <- file.path(OUTPUT_DIR, paste0(file_base, ".xlsx"))
-write.xlsx(final_data, file = excel_path, overwrite = TRUE)
-
-# Save CSV
-csv_path <- file.path(OUTPUT_DIR, paste0(file_base, ".csv"))
-write_csv(final_data, csv_path)
-
-# Save raw data (optional but recommended)
-raw_path <- file.path(OUTPUT_DIR, paste0("KHIS_RAW_", Sys.Date(), ".csv"))
-write_csv(all_data, raw_path)
-
-cat("Files saved successfully:\n")
-cat("Excel:", excel_path, "\n")
-cat("CSV:", csv_path, "\n")
-cat("Raw:", raw_path, "\n")
+output_file <- file.path(OUTPUT_DIR, paste0("DHIS2_FP_Injections_", Sys.Date(), ".xlsx"))
+write.xlsx(final_data, output_file, overwrite = TRUE)
+cli_alert_success(glue("SUCCESS: File saved to {output_file}"))
