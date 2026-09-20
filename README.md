@@ -1,70 +1,480 @@
-# dhis2-data-pipeline
-Automated R pipeline for extracting, cleaning, and transforming DHIS2 data via the analytics API, with batch processing and structured outputs.
+# DHIS2 Data Pipeline – KHIS Family Planning
 
-# DHIS2 Data Pipeline – KHIS Injectables
+An R-based data pipeline for extracting, transforming, aggregating, and exporting family planning service-delivery data from the **Kenya Health Information System (KHIS) / DHIS2 Analytics API**.
 
-## 📊 Overview
+The pipeline retrieves facility-level data, builds the health-facility administrative hierarchy, classifies facilities by ownership, processes selected family planning indicators, and produces a structured Excel dataset for analysis and reporting.
 
-This project is an R-based data pipeline that extracts, processes, and exports family planning injectable data from the Kenya Health Information System (DHIS2 / KHIS).
+---
 
-It automates:
+##  Overview
 
-* Data extraction via DHIS2 Analytics API
-* Transformation and aggregation of indicators
-* Facility-level mapping with administrative hierarchy
-* Export to Excel and CSV formats
+The **DHIS2 Data Pipeline** automates the extraction and preparation of facility-level family planning data from the Kenya DHIS2 instance.
 
+The pipeline connects to the DHIS2 Analytics API and processes data for health facilities across the administrative hierarchy.
 
+The resulting dataset combines:
 
-## 🚀 Features
+* Facility information
+* Facility ownership/grouping
+* MFL codes
+* Ward
+* Sub-county
+* County
+* Reporting period
+* Family planning indicators
 
-* Batch extraction of facility-level data (optimized for performance)
-* Handles API errors and partial responses safely
-* Clean and structured output datasets
-* Supports multiple indicators (DMPA-IM and DMPA-SC)
-* Uses environment variables for secure credential management
+The pipeline is designed to make DHIS2 data extraction reproducible and suitable for downstream analysis, reporting, dashboards, and data-quality assessment.
 
+---
 
+## 🔄 Data Pipeline Workflow
+
+```text
+                 KHIS / DHIS2
+                      │
+                      ▼
+             DHIS2 Metadata API
+                      │
+          ┌───────────┴───────────┐
+          ▼                       ▼
+   Organisation Units        Data Elements
+          │
+          ▼
+   Facility Identification
+      (Level 5 Units)
+          │
+          ▼
+   Administrative Hierarchy
+          │
+          ├── Country
+          ├── County
+          ├── Sub-county
+          ├── Ward
+          └── Facility
+          │
+          ▼
+   Facility Ownership Mapping
+          │
+          ├── Public
+          ├── NGO
+          ├── Faith Based
+          ├── Private
+          └── Unclassified
+          │
+          ▼
+      Batch Extraction
+       (50 facilities)
+          │
+          ▼
+    DHIS2 Analytics API
+          │
+          ▼
+     Raw Service Data
+          │
+          ▼
+   Indicator Transformation
+          │
+          ▼
+ Aggregation & Restructuring
+          │
+          ▼
+     Final Analytical Dataset
+          │
+          ▼
+        Excel (.xlsx)
+```
+
+---
+
+## 🚀 Key Features
+
+* DHIS2 Analytics API integration
+* Automated organisation-unit retrieval
+* Facility-level data extraction
+* Administrative hierarchy mapping
+* Facility ownership classification
+* Batch processing of facilities
+* Extraction across multiple reporting months
+* Multiple family planning indicators
+* Data aggregation and deduplication
+* Wide-format analytical dataset
+* Excel output generation
+* API error handling
+* Empty-response handling
+* HTTP status validation
+* CSV response parsing
+* Configurable batch size
+* Configurable reporting period
+
+---
+
+## 🏥 Facility Identification and Hierarchy
+
+The pipeline retrieves DHIS2 organisation units and identifies **Level 5 organisation units as facilities**.
+
+The facility hierarchy is constructed using the parent-child relationships provided by DHIS2.
+
+The resulting hierarchy contains:
+
+| Level      | Field             |
+| ---------- | ----------------- |
+| Country    | `country_name`    |
+| County     | `county_name`     |
+| Sub-county | `sub_county_name` |
+| Ward       | `ward_name`       |
+| Facility   | `facility_name`   |
+
+Each facility is also retained with its DHIS2 organisation-unit identifier:
+
+```text
+facility_id
+```
+
+The facility code is renamed to:
+
+```text
+mfl_code
+```
+
+---
+
+## 🏥 Facility Ownership Classification
+
+The pipeline maps DHIS2 organisation-unit groups to facility ownership categories.
+
+The current mapping is:
+
+| DHIS2 Ownership Group | Output Classification |
+| --------------------- | --------------------- |
+| `AaAF5EmS1fk`         | Public                |
+| `g58rumvciv2`         | NGO                   |
+| `eT1vvFVhLHc`         | Faith Based           |
+| `aRxa6o8GqZN`         | Private               |
+
+Facilities that do not match any of the configured ownership groups receive a missing ownership value (`NA`) and can therefore be treated as **Unclassified** during analysis.
+
+### Ownership field
+
+The resulting dataset contains:
+
+```text
+ownership
+```
+
+Possible values include:
+
+```text
+Public
+NGO
+Faith Based
+Private
+NA / Unclassified
+```
+
+This allows service-delivery data to be analyzed according to facility ownership.
+
+---
+
+## 💉 Indicators Extracted
+
+The pipeline currently extracts six DHIS2 data-element combinations.
+
+### DMPA-IM
+
+* DMPA-IM New Clients
+* DMPA-IM Re-visits
+
+### DMPA-SC
+
+* DMPA-SC New Clients
+* DMPA-SC Re-visits
+
+### Hormonal IUD
+
+Two DHIS2 data elements are extracted and combined into the single analytical indicator:
+
+```text
+Hormonal_IUD
+```
+
+The final indicator set is therefore:
+
+```text
+DMPA_IM_New_clients
+DMPA_IM_Re_visits
+DMPA_SC_New_clients
+DMPA_SC_Re_visits
+Hormonal_IUD
+```
+
+---
+
+## 📅 Reporting Period
+
+The current extraction period is:
+
+```text
+January 2025 – August 2026
+```
+
+The script uses:
+
+```r
+"2025-01-01"
+```
+
+as the start date and:
+
+```r
+"2026-08-01"
+```
+
+as the end date.
+
+The pipeline generates monthly periods between these dates.
+
+---
+
+## 📦 Batch Processing
+
+To reduce the size of individual DHIS2 API requests, facilities are divided into batches.
+
+The current configuration is:
+
+```r
+BATCH_SIZE <- 50
+```
+
+Therefore, facilities are processed in groups of **50 facilities per API extraction request**.
+
+A two-second pause is also applied between batches:
+
+```r
+Sys.sleep(2)
+```
+
+This helps reduce continuous request pressure on the DHIS2 server.
+
+---
+
+## 🔐 DHIS2 Connection
+
+The pipeline connects to:
+
+```text
+https://hiskenya.dha.go.ke
+```
+
+The following DHIS2 API endpoints are used:
+
+### Organisation Units
+
+```text
+/api/organisationUnits
+```
+
+The pipeline retrieves:
+
+* ID
+* Name
+* Level
+* Code
+* Parent
+* Organisation-unit groups
+
+### Data Elements
+
+```text
+/api/dataElements
+```
+
+The pipeline retrieves:
+
+* ID
+* Name
+* Short name
+
+### Analytics
+
+```text
+/api/analytics.csv
+```
+
+The Analytics API is used to retrieve the selected indicators for the selected facilities and reporting periods.
+
+---
+
+## 🧹 Data Processing
+
+After extraction, the pipeline performs several transformation steps.
+
+### 1. Period conversion
+
+DHIS2 period values are converted into R monthly date values.
+
+```r
+period = ym(period)
+```
+
+### 2. Facility metadata join
+
+The extracted service-delivery data is joined with the cleaned facility metadata.
+
+The join uses the DHIS2 organisation-unit ID:
+
+```text
+org_unit → facility_id
+```
+
+### 3. Indicator identification
+
+DHIS2 data-element identifiers are converted into human-readable indicator names.
+
+### 4. Filtering
+
+Records without a recognized indicator name are removed.
+
+### 5. Aggregation
+
+Records are grouped by:
+
+```text
+county_name
+sub_county_name
+facility_name
+org_unit
+ownership
+period
+indicator_name
+```
+
+Values are then summed.
+
+This ensures that duplicate records for the same facility, period, ownership, and indicator are consolidated.
+
+### 6. Restructuring
+
+The data is converted from long format into a wide analytical format using `pivot_wider()`.
+
+Each indicator becomes a separate column.
+
+---
+
+## 📋 Final Dataset Structure
+
+The final dataset contains the following main fields:
+
+```text
+county_name
+sub_county_name
+facility_name
+org_unit
+ownership
+period
+DMPA_IM_New_clients
+DMPA_IM_Re_visits
+DMPA_SC_New_clients
+DMPA_SC_Re_visits
+Hormonal_IUD
+```
+
+The dataset therefore provides a facility-level view of family planning service delivery across reporting periods.
+
+---
+
+## 📁 Output
+
+The pipeline currently generates an Excel workbook.
+
+The output filename follows this format:
+
+```text
+DHIS2_FP_Injections_YYYY-MM-DD.xlsx
+```
+
+For example:
+
+```text
+DHIS2_FP_Injections_2026-09-20.xlsx
+```
+
+The output location is configured through:
+
+```r
+OUTPUT_DIR
+```
+
+The current local configuration points to:
+
+```text
+C:/Users/Obadia/Desktop/DHIS2
+```
+
+The workbook is created using the `openxlsx` package.
+
+---
+
+## 📊 Potential Uses
+
+The resulting dataset can be used for:
+
+* Family planning service-delivery analysis
+* Facility-level reporting
+* County-level reporting
+* Sub-county analysis
+* Ownership-group analysis
+* DMPA-IM monitoring
+* DMPA-SC monitoring
+* Hormonal IUD monitoring
+* Data-quality assessment
+* Dashboard development
+* Excel-based reporting
+* Power BI data preparation
+* Trend analysis across reporting periods
+
+---
 
 ## 🧱 Project Structure
 
+```text
+dhis2-data-pipeline/
+│
+├── data_pipeline.R
+│   └── Main extraction, transformation and export script
+│
+├── README.md
+│   └── Project documentation
+│
+└── .gitignore
+    └── Files and credentials excluded from Git
+```
 
-├── data_pipeline.R      # Main script
-├── README.md           # Project documentation
-├── .gitignore          # Ignore sensitive & output files
+Generated output files should preferably be stored outside the Git repository or excluded using `.gitignore`.
 
+---
 
+## 📦 Required R Packages
 
+The pipeline uses the following R packages:
 
-## 🔐 Environment Setup
+```r
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(janitor)
+library(glue)
+library(tidyverse)
+library(cli)
+library(openxlsx)
+library(lubridate)
+library(stringr)
+library(purrr)
+library(readr)
+```
 
-This project uses environment variables to keep credentials secure.
+Install them with:
 
-### 1. Create a `.Renviron` file
-
-Location:
-
-
-C:/Users/YourUsername/.Renviron
-
-
-Add:
-
-
-DHIS2_USERNAME=your_username
-DHIS2_PASSWORD=your_password
-DHIS2_BASE_URL=YOURBASE url
-
-
-Restart R after saving.
-
-
-
-## 📦 Required Packages
-
-Install required packages:
-
-r
+```r
 install.packages(c(
   "httr",
   "jsonlite",
@@ -79,93 +489,213 @@ install.packages(c(
   "purrr",
   "readr"
 ))
+```
 
-
-
+---
 
 ## ▶️ How to Run
 
-1. Open R or RStudio
-2. Set working directory to project folder
-3. Run:
+### 1. Install R
 
-r
+Install R and, optionally, RStudio.
+
+### 2. Install the required packages
+
+Run:
+
+```r
+install.packages(c(
+  "httr",
+  "jsonlite",
+  "dplyr",
+  "janitor",
+  "glue",
+  "tidyverse",
+  "cli",
+  "openxlsx",
+  "lubridate",
+  "stringr",
+  "purrr",
+  "readr"
+))
+```
+
+### 3. Configure DHIS2 credentials
+
+Credentials should be stored securely as environment variables rather than directly in the script.
+
+For example, create a `.Renviron` file:
+
+```text
+DHIS2_USERNAME=your_username
+DHIS2_PASSWORD=your_password
+DHIS2_BASE_URL=https://hiskenya.dha.go.ke
+```
+
+The R script should then retrieve them using:
+
+```r
+USERNAME <- Sys.getenv("DHIS2_USERNAME")
+PASSWORD <- Sys.getenv("DHIS2_PASSWORD")
+BASE_URL <- Sys.getenv("DHIS2_BASE_URL")
+```
+
+### 4. Configure the output directory
+
+Modify:
+
+```r
+OUTPUT_DIR <- "C:/Users/Obadia/Desktop/DHIS2"
+```
+
+if a different output location is required.
+
+### 5. Run the pipeline
+
+From R/RStudio:
+
+```r
 source("data_pipeline.R")
+```
 
+The pipeline will retrieve the configured DHIS2 data, process the facility metadata and indicators, and save the final Excel dataset.
 
-## 📁 Output
+---
 
-The script generates:
+## 🔒 Security
 
-* 📄 Excel file (`.xlsx`)
-* 📄 CSV file (clean dataset)
-* 📄 Raw extracted data
+DHIS2 credentials must never be committed to GitHub.
 
-Saved in:
+Do not store credentials directly in:
 
+```text
+data_pipeline.R
+```
 
-YOUR OUTPUT LOCAL LOCATION
+Use `.Renviron` or another secure credential-management mechanism.
 
+Add `.Renviron` to `.gitignore`:
 
+```gitignore
+.Renviron
+```
 
-## 📊 Indicators Included
+Also consider excluding generated data files:
 
-* DMPA-IM New Clients
-* DMPA-IM Re-visits
-* DMPA-SC New Clients
-* DMPA-SC Re-visits
+```gitignore
+*.xlsx
+*.csv
+output/
+```
 
+### Important
 
+The pipeline may process health-service data. Before sharing generated datasets, confirm that the data does not contain information that should not be publicly distributed.
+
+---
+
+## ⚠️ Error Handling
+
+The extraction function checks for several potential API problems.
+
+It handles:
+
+* Request errors
+* Non-success HTTP status codes
+* Partial HTTP responses (`206`)
+* Empty API responses
+* CSV parsing failures
+* Empty datasets
+
+When a batch cannot be retrieved or parsed, the pipeline generates a warning and continues processing the remaining batches.
+
+---
 
 ## ⚙️ Configuration
 
-You can modify:
+The following parameters can be changed depending on the extraction requirement.
 
-* Date range:
+### DHIS2 Server
 
-r
-"2025-01-01" to "2026-03-01"
+```r
+BASE_URL
+```
 
+### Reporting Period
 
-* Data elements:
+```r
+"2025-01-01"
+"2026-08-01"
+```
 
-r
-DX <- c(...)
+### Indicators
 
+```r
+DX <- c(
+  ...
+)
+```
 
-* Batch size:
+### Batch Size
 
-r
+```r
 BATCH_SIZE <- 50
+```
 
+### Output Directory
 
-## ⚠️ Notes
+```r
+OUTPUT_DIR
+```
 
-* Ensure DHIS2 credentials are valid
-* Large queries are batched to avoid API timeouts
-* Do NOT commit `.Renviron` or output data files
+---
 
+## 🔮 Future Improvements
 
+Potential improvements include:
 
-## 🛠️ Future Improvements
+* Automatic retry with exponential backoff
+* Detailed API extraction logs
+* Separate raw-data export
+* CSV output alongside Excel
+* Automated data-quality validation
+* Configurable ownership mappings
+* Configurable indicator mappings
+* Automated scheduling
+* Command-line execution
+* Docker containerization
+* Automated testing
+* Pipeline configuration through an external configuration file
+* Power BI integration
+* Automated reporting
 
-* Add logging system
-* Automate scheduling (cron / task scheduler)
-* Add retry logic for failed API calls
-* Containerize with Docker
-
-
+---
 
 ## 👤 Author
 
-Obadia Yano
-📧 Email: Obadiayano45@gmail.com
+**Obadia Yano**
+
+**Data Analytics Software Developer**
+
+📧 Email: [Obadiayano45@gmail.com](mailto:Obadiayano45@gmail.com)
+
 📞 Phone: +254 702 268 762
+
 🔗 LinkedIn: https://www.linkedin.com/in/obadia-yano-761025238/
+
 💻 GitHub Portfolio: https://yanoobed.github.io/
+
+---
 
 ## 📄 License
 
-This project is for internal/public health data use. Add a license if sharing externally.
+This repository currently does not specify an open-source license.
+
+If the code is intended for external reuse or distribution, add an appropriate license to the repository.
 
 ---
+
+## 🔗 Repository
+
+**GitHub:**
+https://github.com/YanoObed/dhis2-data-pipeline
